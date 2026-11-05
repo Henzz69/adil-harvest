@@ -117,6 +117,83 @@ def jsave(path, obj):
     os.replace(tmp, path)
 
 
+GIST_ID = os.environ.get('ADIL_GIST_ID', '').strip()
+GIST_TOKEN = os.environ.get('ADIL_GIST_TOKEN', '').strip()
+_GIST_FILES = ['master_phones.txt', 'balances.json', 'watchlist.json',
+               'mask_targets.json', 'mask_found.json', 'top_live.json', 'codes.json']
+
+
+def _gist_headers():
+    t = GIST_TOKEN or os.environ.get('GITHUB_TOKEN', '').strip()
+    return {'Authorization': 'Bearer ' + t, 'Accept': 'application/vnd.github+json',
+            'User-Agent': 'adil'} if t else {}
+
+
+def gist_pull():
+    """Restore state files from the secret gist (public repo stays clean)."""
+    if not GIST_ID:
+        return 0
+    H_ = _gist_headers()
+    if 'Authorization' not in H_:
+        return 0
+    try:
+        r = requests.get('https://api.github.com/gists/' + GIST_ID, headers=H_, timeout=40, verify=False)
+        if r.status_code != 200:
+            log('gist_pull failed %s' % r.status_code)
+            return 0
+        got = 0
+        for name, meta in (r.json().get('files') or {}).items():
+            if name not in _GIST_FILES:
+                continue
+            try:
+                content = meta.get('content')
+                if content is None and meta.get('raw_url'):
+                    content = requests.get(meta['raw_url'], headers=H_, timeout=40, verify=False).text
+                if content:
+                    with open(os.path.join(STATE, name), 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    got += 1
+            except Exception:
+                pass
+        log('gist_pull: restored %d state file(s)' % got)
+        return got
+    except Exception:
+        log('gist_pull error: ' + traceback.format_exc()[-120:])
+        return 0
+
+
+def gist_push():
+    """Persist state files back to the secret gist."""
+    if not GIST_ID:
+        return False
+    H_ = _gist_headers()
+    if 'Authorization' not in H_:
+        return False
+    files = {}
+    for name in _GIST_FILES:
+        p = os.path.join(STATE, name)
+        if not os.path.exists(p):
+            continue
+        try:
+            c = open(p, encoding='utf-8').read()
+            if len(c) > 900000:      # gist per-file soft limit
+                c = c[:900000]
+            files[name] = {'content': c}
+        except Exception:
+            pass
+    if not files:
+        return False
+    try:
+        r = requests.patch('https://api.github.com/gists/' + GIST_ID, headers=H_,
+                           json={'files': files}, timeout=60, verify=False)
+        ok = r.status_code in (200, 201)
+        log('gist_push: %s (%d files)' % ('ok' if ok else r.status_code, len(files)))
+        return ok
+    except Exception:
+        log('gist_push error: ' + traceback.format_exc()[-120:])
+        return False
+
+
 def load_master():
     try:
         with open(F_MASTER) as f:
@@ -1048,6 +1125,7 @@ def run_budgeted(mode, budget):
     t0 = time.time()
     log('=== budgeted run mode=%s budget=%ss ===' % (mode, budget))
     capture_chat_id()
+    gist_pull()
     try:
         handle_pending_updates()
     except Exception:
@@ -1252,6 +1330,7 @@ def run_budgeted(mode, budget):
     except Exception:
         pass
 
+    gist_push()
     log('=== budgeted run finished ===')
 
 

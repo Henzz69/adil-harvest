@@ -1,6 +1,9 @@
 .ghtok
+.gistid
 adil_bot.log
 __pycache__/
 *.pyc
 adil_bot.out
-state/config.json
+# state now lives in the secret gist, never in this (public) repo
+state/*.json
+state/*.txt
