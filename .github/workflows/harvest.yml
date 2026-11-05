@@ -1,0 +1,69 @@
+# .github/workflows/harvest.yml
+# FREE 24/7 on GitHub Actions — no card, no VPS.
+#  * refund watcher  : every 10 min  (catches re-funds, mints + pushes codes)
+#  * full rescan     : every 6 hours (long job)
+# State is committed back to the repo so progress survives between runs.
+name: adil-harvest
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'      # refund watch + lb + spin (fast pass)
+    - cron: '0 */6 * * *'       # full rescan (slow pass)
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'fast | rescan'
+        default: 'fast'
+
+concurrency:
+  group: adil-${{ github.event.schedule || inputs.mode }}
+  cancel-in-progress: false
+
+jobs:
+  fast:
+    if: github.event.schedule == '*/10 * * * *' || inputs.mode == 'fast'
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install -q requests urllib3
+      - name: fast pass (refund + leaderboard + spin + mask slice)
+        env:
+          ADIL_BOT_TOKEN: ${{ secrets.ADIL_BOT_TOKEN }}
+          ADIL_CHAT_ID: ${{ secrets.ADIL_CHAT_ID }}
+          ADIL_MODE: fast
+          ADIL_BUDGET: '420'
+        run: python -u adil_bot.py
+      - name: persist state
+        run: |
+          git config user.name  "adil-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add -A state || true
+          git commit -m "state: fast $(date -u +%FT%TZ)" || true
+          git push || true
+
+  rescan:
+    if: github.event.schedule == '0 */6 * * *' || inputs.mode == 'rescan'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install -q requests urllib3
+      - name: full rescan
+        env:
+          ADIL_BOT_TOKEN: ${{ secrets.ADIL_BOT_TOKEN }}
+          ADIL_CHAT_ID: ${{ secrets.ADIL_CHAT_ID }}
+          ADIL_MODE: rescan
+          ADIL_BUDGET: '19800'
+        run: python -u adil_bot.py
+      - name: persist state
+        run: |
+          git config user.name  "adil-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add -A state || true
+          git commit -m "state: rescan $(date -u +%FT%TZ)" || true
+          git push || true

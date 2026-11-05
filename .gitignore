@@ -1,0 +1,6 @@
+.ghtok
+adil_bot.log
+__pycache__/
+*.pyc
+adil_bot.out
+state/config.json

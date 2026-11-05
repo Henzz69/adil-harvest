@@ -1,0 +1,25 @@
+# fly.toml — always-on 24/7 harvest bot
+app = "adil-harvest"
+primary_region = "fra"
+
+[build]
+
+[env]
+  # set ADIL_BOT_TOKEN with:  fly secrets set ADIL_BOT_TOKEN=123:ABC
+  PYTHONUNBUFFERED = "1"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+# never auto-stop — must run 24/7
+[http_service]
+  internal_port = 8080
+  force_https = false
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[mounts]
+  source = "adil_state"
+  destination = "/app/state"
