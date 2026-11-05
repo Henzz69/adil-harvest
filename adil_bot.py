@@ -877,6 +877,31 @@ def tg_poll():
 
 # ---------------------------------------------------------------- main
 # ---------------------------------------------------------------- main
+def capture_chat_id():
+    """If no chat_id is known, read getUpdates once and persist the first chat.
+
+    Needed on ephemeral hosts (GitHub Actions) where state/config.json is the
+    only memory. Harmless elsewhere.
+    """
+    if cfg().get('chat_id'):
+        return cfg().get('chat_id')
+    if not BOT_TOKEN:
+        return None
+    try:
+        u = requests.get('https://api.telegram.org/bot%s/getUpdates' % BOT_TOKEN,
+                         params={'timeout': 0, 'limit': 10}, timeout=25, verify=False).json()
+        for up in u.get('result', []):
+            m = up.get('message') or up.get('channel_post') or {}
+            c = m.get('chat') or {}
+            if c.get('id'):
+                set_cfg(chat_id=str(c['id']))
+                log('captured chat_id=%s' % c['id'])
+                return str(c['id'])
+    except Exception:
+        pass
+    return None
+
+
 def run_budgeted(mode, budget):
     """One-shot mode for GitHub Actions / cron hosts.
 
@@ -886,6 +911,7 @@ def run_budgeted(mode, budget):
     """
     t0 = time.time()
     log('=== budgeted run mode=%s budget=%ss ===' % (mode, budget))
+    capture_chat_id()
 
     def left():
         return budget - (time.time() - t0)
