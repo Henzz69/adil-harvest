@@ -916,6 +916,47 @@ def capture_chat_id():
     return None
 
 
+def handle_pending_updates():
+    """Process any Telegram commands queued since the last cron run.
+
+    GitHub Actions jobs are short-lived, so instead of long-polling we drain
+    getUpdates once per run and answer everything. Latency = cron interval.
+    """
+    global BOT_TOKEN
+    if not BOT_TOKEN:
+        BOT_TOKEN = _bootstrap_token()
+    if not BOT_TOKEN:
+        return 0
+    handled = 0
+    offset = int(cfg().get('tg_offset') or 0)
+    try:
+        u = requests.get('https://api.telegram.org/bot%s/getUpdates' % BOT_TOKEN,
+                         params={'timeout': 0, 'limit': 50, 'offset': offset},
+                         timeout=25, verify=False).json()
+        ups = u.get('result', [])
+        log('telegram: %d pending update(s)' % len(ups))
+        for up in ups:
+            offset = max(offset, up['update_id'] + 1)
+            msg = up.get('message') or up.get('channel_post') or {}
+            txt = msg.get('text') or ''
+            chat = str((msg.get('chat') or {}).get('id') or '')
+            if not txt or not chat:
+                continue
+            if ALLOWED_CHAT and chat != ALLOWED_CHAT:
+                log('ignored command from unauthorised chat %s' % chat)
+                continue
+            log('cmd from %s: %s' % (chat, txt[:60]))
+            try:
+                handle_command(txt, chat)
+                handled += 1
+            except Exception:
+                log('cmd error: ' + traceback.format_exc()[-150:])
+        set_cfg(tg_offset=offset)
+    except Exception:
+        log('getUpdates failed: ' + traceback.format_exc()[-120:])
+    return handled
+
+
 def run_budgeted(mode, budget):
     """One-shot mode for GitHub Actions / cron hosts.
 
@@ -926,6 +967,10 @@ def run_budgeted(mode, budget):
     t0 = time.time()
     log('=== budgeted run mode=%s budget=%ss ===' % (mode, budget))
     capture_chat_id()
+    try:
+        handle_pending_updates()
+    except Exception:
+        pass
 
     def left():
         return budget - (time.time() - t0)
@@ -1064,7 +1109,7 @@ def run_budgeted(mode, budget):
                 log('mask slice: last3=%s resuming at offset %d' % (l3, start_off))
                 found = []
                 checked = 0
-                end = min(time.time() + left() - 30, time.time() + 600)
+                end = min(time.time() + left() - 30, time.time() + 240)
                 done_mask = False
                 for d1 in ('9', '7'):
                     if done_mask:
