@@ -505,8 +505,15 @@ def tg(method, **payload):
         return None
 
 
+def _target_chat(chat_id=None):
+    """Single source of truth: ALLOWED_CHAT always wins (lock-down)."""
+    if ALLOWED_CHAT:
+        return ALLOWED_CHAT
+    return chat_id or cfg().get('chat_id')
+
+
 def tg_send(text, chat_id=None):
-    cid = chat_id or cfg().get('chat_id') or ALLOWED_CHAT
+    cid = _target_chat(chat_id)
     if not cid:
         return
     tg('sendMessage', chat_id=cid, text=text, parse_mode='HTML',
@@ -515,7 +522,7 @@ def tg_send(text, chat_id=None):
 
 def tg_send_kb(text, buttons, chat_id=None):
     """buttons: list of (label, url) -> inline URL keyboard (opens directly)."""
-    cid = chat_id or cfg().get('chat_id') or ALLOWED_CHAT
+    cid = _target_chat(chat_id)
     if not cid:
         return
     kb = {'inline_keyboard': [[{'text': lbl, 'url': url}] for lbl, url in buttons]}
@@ -866,10 +873,15 @@ def tg_poll():
                 chat = str((msg.get('chat') or {}).get('id') or '')
                 if not txt:
                     continue
+                # LOCK-DOWN: only the owner's chat is served
                 if ALLOWED_CHAT and chat != ALLOWED_CHAT:
+                    log('ignored message from unauthorised chat %s' % chat)
                     continue
-                if not cfg().get('chat_id'):
+                if not ALLOWED_CHAT and not cfg().get('chat_id'):
                     set_cfg(chat_id=chat)
+                elif not ALLOWED_CHAT and cfg().get('chat_id') and chat != cfg().get('chat_id'):
+                    log('ignored message from non-owner chat %s' % chat)
+                    continue
                 threading.Thread(target=handle_command, args=(txt, chat), daemon=True).start()
         except Exception:
             time.sleep(5)
@@ -880,9 +892,11 @@ def tg_poll():
 def capture_chat_id():
     """If no chat_id is known, read getUpdates once and persist the first chat.
 
-    Needed on ephemeral hosts (GitHub Actions) where state/config.json is the
-    only memory. Harmless elsewhere.
+    When ALLOWED_CHAT is set the bot is locked to that single user, so nothing
+    is captured from anyone else.
     """
+    if ALLOWED_CHAT:
+        return ALLOWED_CHAT
     if cfg().get('chat_id'):
         return cfg().get('chat_id')
     if not BOT_TOKEN:
