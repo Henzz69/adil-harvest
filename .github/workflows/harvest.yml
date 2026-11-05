@@ -1,40 +1,43 @@
 # .github/workflows/harvest.yml
-# FREE 24/7 on GitHub Actions — no card, no VPS.
-#  * refund watcher  : every 10 min  (catches re-funds, mints + pushes codes)
-#  * full rescan     : every 6 hours (long job)
-# State is committed back to the repo so progress survives between runs.
+# Free CI plan: 2,000 min/month (private repo) ≈ 66 min/day. Budget below ≈ 60 min/day.
+#   fast pass  : every 60 min  (~1.5 min each = 36 min/day)  refund + lb + mask slice + commands
+#   shard sweep: 2x/day, 1/2 of master each (~11 min each = 22 min/day) -> full coverage daily
+# For per-second updates + non-stop rescan use the always-on host (see README).
 name: adil-harvest
 
 on:
   schedule:
-    - cron: '*/10 * * * *'      # refund watch + lb + spin (fast pass)
-    - cron: '0 */6 * * *'       # full rescan (slow pass)
+    - cron: '0 * * * *'        # hourly fast pass
+    - cron: '15 2,14 * * *'    # shard 0/2 at 02:15 and shard 1/2 at 14:15
   workflow_dispatch:
     inputs:
-      mode:
-        description: 'fast | rescan'
-        default: 'fast'
+      mode:   { description: 'fast | rescan', default: 'fast' }
+      shard:  { description: 'e.g. 0/2', default: '' }
 
 concurrency:
   group: adil-${{ github.event.schedule || inputs.mode }}
   cancel-in-progress: false
 
+permissions:
+  contents: write
+  actions: write
+
 jobs:
   fast:
-    if: github.event.schedule == '*/10 * * * *' || inputs.mode == 'fast'
+    if: github.event.schedule == '0 * * * *' || inputs.mode == 'fast'
     runs-on: ubuntu-latest
-    timeout-minutes: 9
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
       - run: pip install -q requests urllib3
-      - name: fast pass (refund + leaderboard + spin + mask slice)
+      - name: fast pass
         env:
           ADIL_BOT_TOKEN: ${{ secrets.ADIL_BOT_TOKEN }}
           ADIL_CHAT_ID: ${{ secrets.ADIL_CHAT_ID }}
           ADIL_MODE: fast
-          ADIL_BUDGET: '420'
+          ADIL_BUDGET: '480'
         run: python -u adil_bot.py
       - name: persist state
         run: |
@@ -44,26 +47,33 @@ jobs:
           git commit -m "state: fast $(date -u +%FT%TZ)" || true
           git push || true
 
-  rescan:
-    if: github.event.schedule == '0 */6 * * *' || inputs.mode == 'rescan'
+  shard:
+    if: github.event.schedule == '15 2,14 * * *' || inputs.mode == 'rescan'
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
       - run: pip install -q requests urllib3
-      - name: full rescan
+      - name: rescan shard
         env:
           ADIL_BOT_TOKEN: ${{ secrets.ADIL_BOT_TOKEN }}
           ADIL_CHAT_ID: ${{ secrets.ADIL_CHAT_ID }}
           ADIL_MODE: rescan
-          ADIL_BUDGET: '19800'
-        run: python -u adil_bot.py
+          ADIL_BUDGET: '2100'
+          ADIL_SHARD: ${{ github.event.schedule == '15 2,14 * * *' && (github.event.schedule == '15 2,14 * * *' && 'AUTO' || '') || inputs.shard }}
+        run: |
+          if [ "$ADIL_SHARD" = "AUTO" ] || [ -z "$ADIL_SHARD" ]; then
+            H=$(date -u +%H)
+            if [ "$H" -lt 12 ]; then ADIL_SHARD=0/2; else ADIL_SHARD=1/2; fi
+          fi
+          echo "shard=$ADIL_SHARD"
+          python -u adil_bot.py
       - name: persist state
         run: |
           git config user.name  "adil-bot"
           git config user.email "bot@users.noreply.github.com"
           git add -A state || true
-          git commit -m "state: rescan $(date -u +%FT%TZ)" || true
+          git commit -m "state: shard $(date -u +%FT%TZ)" || true
           git push || true
