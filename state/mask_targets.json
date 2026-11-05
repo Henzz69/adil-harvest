@@ -1,1 +1,106 @@
-{"done": [], "pending": [{"last3": "363", "win": 10128, "game": "Aviator"}, {"last3": "051", "win": 6300, "game": "Aviator"}, {"last3": "565", "win": 4000, "game": "Aviator"}, {"last3": "114", "win": 3600, "game": "Foxy Hot 20"}, {"last3": "365", "win": 2000, "game": "Winning Clover 5"}, {"last3": "041", "win": 1500, "game": "Multi Hot 5"}, {"last3": "464", "win": 1500, "game": "Multi Hot 5"}, {"last3": "647", "win": 1250, "game": "1000 Amigo Monkeys"}, {"last3": "176", "win": 11560, "game": "Aviator"}, {"last3": "914", "win": 5480, "game": "15 Dragon Coins"}, {"last3": "220", "win": 3360, "game": "Hot Chilli Bells"}, {"last3": "943", "win": 2151, "game": "JetX"}, {"last3": "099", "win": 2100, "game": "Foxy Hot 20"}, {"last3": "590", "win": 1500, "game": "Multi Hot 5"}, {"last3": "839", "win": 1250, "game": "Multi Hot 10"}, {"last3": "888", "win": 1200, "game": "Winning Clover 5"}, {"last3": "276", "win": 1155, "game": "100 Clover Fire"}, {"last3": "614", "win": 1150, "game": "Multi Hot 5 Wild"}, {"last3": "807", "win": 1100, "game": "Foxy Hot 20"}, {"last3": "364", "win": 1100, "game": "Foxy Hot 20"}]}
+{
+ "done": [],
+ "pending": [
+  {
+   "last3": "363",
+   "win": 10128,
+   "game": "Aviator",
+   "offset": 2000
+  },
+  {
+   "last3": "051",
+   "win": 6300,
+   "game": "Aviator"
+  },
+  {
+   "last3": "565",
+   "win": 4000,
+   "game": "Aviator"
+  },
+  {
+   "last3": "114",
+   "win": 3600,
+   "game": "Foxy Hot 20"
+  },
+  {
+   "last3": "365",
+   "win": 2000,
+   "game": "Winning Clover 5"
+  },
+  {
+   "last3": "041",
+   "win": 1500,
+   "game": "Multi Hot 5"
+  },
+  {
+   "last3": "464",
+   "win": 1500,
+   "game": "Multi Hot 5"
+  },
+  {
+   "last3": "647",
+   "win": 1250,
+   "game": "1000 Amigo Monkeys"
+  },
+  {
+   "last3": "176",
+   "win": 11560,
+   "game": "Aviator"
+  },
+  {
+   "last3": "914",
+   "win": 5480,
+   "game": "15 Dragon Coins"
+  },
+  {
+   "last3": "220",
+   "win": 3360,
+   "game": "Hot Chilli Bells"
+  },
+  {
+   "last3": "943",
+   "win": 2151,
+   "game": "JetX"
+  },
+  {
+   "last3": "099",
+   "win": 2100,
+   "game": "Foxy Hot 20"
+  },
+  {
+   "last3": "590",
+   "win": 1500,
+   "game": "Multi Hot 5"
+  },
+  {
+   "last3": "839",
+   "win": 1250,
+   "game": "Multi Hot 10"
+  },
+  {
+   "last3": "888",
+   "win": 1200,
+   "game": "Winning Clover 5"
+  },
+  {
+   "last3": "276",
+   "win": 1155,
+   "game": "100 Clover Fire"
+  },
+  {
+   "last3": "614",
+   "win": 1150,
+   "game": "Multi Hot 5 Wild"
+  },
+  {
+   "last3": "807",
+   "win": 1100,
+   "game": "Foxy Hot 20"
+  },
+  {
+   "last3": "364",
+   "win": 1100,
+   "game": "Foxy Hot 20"
+  }
+ ]
+}

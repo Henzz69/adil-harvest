@@ -1044,12 +1044,21 @@ def run_budgeted(mode, budget):
             jsave(F_MASK, st)
             pend = [m for m in (st.get('pending') or []) if m['last3'] not in set(st.get('done') or [])]
             if pend:
-                l3 = pend[0]['last3']
-                log('mask slice: last3=%s' % l3)
+                tgt = pend[0]
+                l3 = tgt['last3']
+                start_off = int(tgt.get('offset') or 0)
+                log('mask slice: last3=%s resuming at offset %d' % (l3, start_off))
                 found = []
+                checked = 0
                 end = min(time.time() + left() - 30, time.time() + 600)
+                done_mask = False
                 for d1 in ('9', '7'):
+                    if done_mask:
+                        break
                     for mid in range(100000):
+                        idx = (0 if d1 == '9' else 100000) + mid
+                        if idx < start_off:
+                            continue
                         if time.time() > end:
                             break
                         ph = '251' + d1 + '%05d' % mid + l3
@@ -1067,10 +1076,30 @@ def run_budgeted(mode, budget):
                                 tg_send('🔓 mask hit +%s (last3=%s)' % (ph, l3))
                         except Exception:
                             pass
+                        checked += 1
+                        if checked % 100 == 0:
+                            st = jload(F_MASK, {'done': [], 'pending': []})
+                            for m in (st.get('pending') or []):
+                                if m.get('last3') == l3:
+                                    m['offset'] = idx + 1
+                            jsave(F_MASK, st)
                         time.sleep(0.01)
                     if time.time() > end:
                         break
-                log('mask slice done: %d found (last3=%s not finished)' % (len(found), l3))
+                    if mid >= 99999:
+                        done_mask = True
+                st = jload(F_MASK, {'done': [], 'pending': []})
+                if done_mask:
+                    st.setdefault('done', []).append(l3)
+                    st['pending'] = [m for m in (st.get('pending') or []) if m.get('last3') != l3]
+                    log('mask last3=%s COMPLETE: %d found' % (l3, len(found)))
+                    tg_send('✅ mask last3=%s complete — %d accounts found' % (l3, len(found)))
+                else:
+                    for m in (st.get('pending') or []):
+                        if m.get('last3') == l3:
+                            m['offset'] = min(start_off + checked, 200000)
+                    log('mask slice done: %d found this run, saved offset' % len(found))
+                jsave(F_MASK, st)
     except Exception:
         pass
 
