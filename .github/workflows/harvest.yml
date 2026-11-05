@@ -62,7 +62,7 @@ jobs:
           ADIL_CHAT_ID: ${{ secrets.ADIL_CHAT_ID }}
           ADIL_MODE: rescan
           ADIL_BUDGET: '2100'
-          ADIL_SHARD: ${{ github.event.schedule == '15 2,14 * * *' && (github.event.schedule == '15 2,14 * * *' && 'AUTO' || '') || inputs.shard }}
+          ADIL_SHARD: ${{ inputs.shard }}
         run: |
           if [ "$ADIL_SHARD" = "AUTO" ] || [ -z "$ADIL_SHARD" ]; then
             H=$(date -u +%H)
